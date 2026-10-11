@@ -5,17 +5,64 @@ Do **not** invent fields a host does not recognize. Use this matrix to pick the
 fields for the target platform, then keep the published skill in the host-neutral
 core (`name`, `description`, `when_to_use`) plus that platform's additions.
 
+## Verified conclusion (online, 2026-10-11)
+
+SKILL.md is the **"Agent Skills" open standard** published by Anthropic; one
+SKILL.md is read by 20+ agents. Two format families actually coexist:
+
+1. **OpenClaw-native (the common format)** — `metadata.openclaw.*` (requires /
+   primaryEnv / os / install / …). Used by OpenClaw, Hermes, WorkBuddy,
+   CodeBuddy, Trae, Kimi Code, Z-code, Agnes Code, Qoder, Cursor, 千问办公,
+   百度搭子 (all Agent-Skills-standard implementors that adopt OpenClaw's
+   packaging + scanner). "Most use the OpenClaw format" — **confirmed**.
+2. **Claude extensions (a separate, host-specific set)** — `allowed-tools`,
+   `context: fork`, `hooks`, `disable-model-invocation`, `user-invocable`,
+   `argument-hint`, `agent`, `model`, `effort`. Claude Code adds these on top of
+   the standard core; they are **safely ignored** by hosts that don't support
+   them. "Claude uses another format" — **confirmed, as an extension layer, not
+   a competing standard.**
+
+Cross-agent portability rule (agensi.io): for max portability, publish only
+`name` / `description` / `when_to_use` + plain markdown body; agent-specific fields
+are ignored, not errors.
+
 ## Core fields (every platform)
 
 | Field | Required | Notes |
 |---|---|---|
-| `name` | yes | lowercase hyphen slug; the stable trigger key |
-| `description` | yes | what it does + when to use + NOT-for; the primary trigger surface; keep under ~1024 chars |
+| `name` | yes | lowercase hyphen slug; ≤64 chars; the stable trigger key |
+| `description` | yes | what it does + when to use + NOT-for; primary trigger surface; ≤1024 chars |
 | `when_to_use` | recommended | explicit triggers + explicit non-triggers |
 | `tags` | recommended | discovery keywords |
 | `summary` | recommended | one-line plain-English abstract for UI |
 
-## Host A - Claude / WorkBuddy (host-side)
+## Per-platform field matrix (14+ agents)
+
+Legend: **core** = core-fields set; **OpenClaw** = `metadata.openclaw.*` package
+fields; **Claude-ext** = Claude extension fields; **CN-review** = domestic content
+red lines apply (千问办公 / 百度搭子 / SkillHub).
+
+| # | Platform | Format family | Extra fields to add | Notes |
+|---|---|---|---|---|
+| 1 | Claude Code | core + Claude-ext | `allowed-tools`, `context: fork`, `hooks`, `disable-model-invocation`, `user-invocable`, `argument-hint`, `agent`, `model`, `effort` | the reference implementation of the standard |
+| 2 | Codex CLI | core | `when_to_use`, `tags` | Agent-Skills standard reader; no OpenClaw metadata |
+| 3 | OpenClaw | core + OpenClaw | `metadata.openclaw.*` (see Host B) | scanner-clean packaging; `license: MIT-0` default |
+| 4 | Hermes | core + OpenClaw | `metadata.openclaw.*` | OpenClaw-ecosystem host |
+| 5 | WorkBuddy | core + OpenClaw | `metadata.openclaw.*` | also honors Claude-ext when run via Claude runtime |
+| 6 | CodeBuddy | core + OpenClaw | `metadata.openclaw.*` | OpenClaw-ecosystem host |
+| 7 | Trae | core (full Agent-Skills impl) | `.trae/skills/` dir; `when_to_use` | implements the open standard end-to-end |
+| 8 | Kimi Code | core + OpenClaw | `metadata.openclaw.*` | CN host |
+| 9 | Z-code | core + OpenClaw | `metadata.openclaw.*` | CN host |
+| 10 | Agnes Code | core + OpenClaw | `metadata.openclaw.*` | CN host |
+| 11 | Qoder | core + OpenClaw | `metadata.openclaw.*` | CN host |
+| 12 | Cursor | core | partial `when_to_use`; ignores OpenClaw metadata | uses `.cursor/skills` or AGENTS.md bridge |
+| 13 | 千问办公 (Qwen Office) | core + CN-review | CN content red lines; no VPN/"科学上网" wording | domestic review gate |
+| 14 | 百度搭子 (Baidu Dazi) | core + CN-review | CN content red lines | domestic review gate |
+
+> If a host is not in this table, default to **core fields only** — that set is the
+> portability floor that every Agent-Skills reader honors.
+
+## Host A - Claude / WorkBuddy (host-side, extension layer)
 
 These fields are honored by the Claude/WorkBuddy runtime, **not** by the ClawHub
 OpenClaw scanner. They are optional and host-specific; document them per host, do

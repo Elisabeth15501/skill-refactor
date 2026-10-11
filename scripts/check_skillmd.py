@@ -26,13 +26,14 @@ import sys
 
 # ---------------------------------------------------------------- 基础工具
 
-def log(level, rule_id, msg, level_label=None):
-    """统一命中记录。"""
+def log(level, rule_id, msg, level_label=None, hint=""):
+    """统一命中记录。hint = 诊断+建议方案（人工兜底：Agent 改不动时按此指给人）。"""
     global _FINDINGS
     _FINDINGS.append({
         "rule_id": rule_id,
         "severity": level,           # "blocker" | "medium" | "low"
         "msg": msg,
+        "hint": hint,               # 诊断 + 建议方案
     })
     label = level_label or {
         "blocker": "BLOCKER", "medium": "MEDIUM", "low": "LOW",
@@ -98,54 +99,89 @@ BODY_LINE_HARD = 500         # 硬上限（blocker）
 def check_name(slug, name, data, platform):
     # name 规范
     if not name:
-        log("blocker", "FM-101", "缺 name（YAML 必需）。")
+        log("blocker", "FM-101", "缺 name（YAML 必需）。",
+            hint="诊断：frontmatter 无 name 键 → 宿主无法识别该 skill。\n"
+                 "方案：加 `name: <小写连字符slug>`；name 须匹配 ^[a-z0-9]+(-[a-z0-9]+)*$ 且 ≤64 字符。")
         return
     if not NAME_RE.match(name):
-        log("medium", "FM-102", f"name '{name}' 不符合小写连字符 slug 规范（^[a-z0-9]+(-[a-z0-9]+)*$）。")
+        log("medium", "FM-102", f"name '{name}' 不符合小写连字符 slug 规范（^[a-z0-9]+(-[a-z0-9]+)*$）。",
+            hint="诊断：name 含大写字母/下划线/空格。\n方案：改为小写+连字符，如 My_Skill → my-skill。")
     # slug（若存在）须等于 name
     slug_val = data.get("slug")
     if slug_val and slug_val != name:
-        log("low", "FM-103", f"slug '{slug_val}' 与 name '{name}' 不一致。")
+        log("low", "FM-103", f"slug '{slug_val}' 与 name '{name}' 不一致。",
+            hint="诊断：slug 与 name 分叉会导致分发/检索对不上。\n方案：让 slug 与 name 保持一致，或删掉多余字段。")
     # description 必需
     desc = data.get("description")
     if not desc:
-        log("blocker", "FM-104", "缺 description（触发核心，YAML 必需）。")
+        log("blocker", "FM-104", "缺 description（触发核心，YAML 必需）。",
+            hint="诊断：无 description → 渐进式披露 L1 无触发元数据，skill 永不命中。\n"
+                 "方案：补 1~3 句『做什么 + 何时用 + 何时不用』，含触发词与非触发边界（NOT-for）。")
         return
     # description 长度
     if len(str(desc)) > DESC_CHAR_LIMIT:
-        log("low", "FM-105", f"description 长 {len(str(desc))} 字符 > {DESC_CHAR_LIMIT}，宿主可能截断。")
+        log("low", "FM-105", f"description 长 {len(str(desc))} 字符 > {DESC_CHAR_LIMIT}，宿主可能截断。",
+            hint="诊断：description 超出 1024 字符 → 长尾被截断，关键词丢失。\n"
+                 "方案：压缩到 1024 内（保留模式+触发词+NOT-for），把冗长说明下沉到正文/references。")
     # 平台特定字段
     if platform == "clawhub":
         if not data.get("license"):
-            log("medium", "PL-CL-1", "ClawHub 强制 MIT-0；缺 license 字段。")
-        if not data.get("requires"):
-            log("low", "PL-CL-2", "ClawHub：若脚本读 env/调二进制/联网，需在 requires 声明（一致性红线）。")
+            log("medium", "PL-CL-1", "ClawHub 强制 MIT-0；缺 license 字段。",
+                hint="诊断：frontmatter 无 license 键 → ClawHub 会回退默认并可能阻断上架。\n"
+                     "方案：在 frontmatter 顶层加 `license: MIT-0`（若脚本有第三方依赖则按实际选 Apache-2.0/MIT）。")
+        # 识别两种声明路径：顶层 requires（host-side） 或 metadata.openclaw.requires（ClawHub-native 嵌套）
+        top_requires = data.get("requires")
+        meta = data.get("metadata")
+        nested_requires = None
+        if isinstance(meta, dict):
+            oc = meta.get("openclaw")
+            if isinstance(oc, dict):
+                nested_requires = oc.get("requires")
+        requires_present = bool(top_requires or nested_requires)
+        if not requires_present:
+            log("low", "PL-CL-2",
+                "ClawHub：若脚本读 env/调二进制/联网，需在 requires 声明（一致性红线）。",
+                hint="诊断：未声明 requires（顶层或 metadata.openclaw.requires 都没有）。"
+                     "若本 skill 的 scripts/ 确有读 env、调外部二进制或联网，则『声明行为』与『实际行为』不一致。\n"
+                     "方案：若确需声明，按实际依赖写 `metadata.openclaw.requires.bins/env/anyBins/config`；"
+                     "若全本地零依赖（如纯标准库 Python），可不写——此时本项仅为提醒，可直接忽略或留 TODO 注释说明。")
     if platform == "skillhub":
         if not data.get("license"):
-            log("low", "PL-SH-1", "SkillHub：建议保留 license（GitHub 同源分发）。")
+            log("low", "PL-SH-1", "SkillHub：建议保留 license（GitHub 同源分发）。",
+                hint="诊断：无 license 键。\n方案：建议与 GitHub 仓库 LICENSE 保持一致（本 skill 默认 MIT-0）。")
 
 
 def check_body(body, data, platform, token_budget):
     lines = body.count("\n") + (1 if body else 0)
     if lines > BODY_LINE_HARD:
-        log("blocker", "BD-001", f"正文 {lines} 行 > 硬上限 {BODY_LINE_HARD}；请拆 references。")
+        log("blocker", "BD-001", f"正文 {lines} 行 > 硬上限 {BODY_LINE_HARD}；请拆 references。",
+            hint="诊断：正文 >500 行 → 触发后一次性灌入过多 token，挤占 5000 压缩额度。\n"
+                 "方案：把细节/细则/参考样例下沉到 references/（L3 按需加载），正文只留流程+硬约束。")
     elif lines > BODY_LINE_SOFT:
-        log("medium", "BD-002", f"正文 {lines} 行 > 软上限 {BODY_LINE_SOFT}（建议拆 references）。")
+        log("medium", "BD-002", f"正文 {lines} 行 > 软上限 {BODY_LINE_SOFT}（建议拆 references）。",
+            hint="诊断：正文偏长（>200 行）。\n方案：考虑把可独立查阅的块拆到 references/，正文保持精简。")
     # token 预算估算（正文约 4 字符/token，粗算）
     est = len(body) // 4
     if est > token_budget:
-        log("blocker", "BD-003", f"正文估算 ~{est} token > 预算 {token_budget}；请下沉细则。")
+        log("blocker", "BD-003", f"正文估算 ~{est} token > 预算 {token_budget}；请下沉细则。",
+            hint="诊断：正文 token 超预算 → 宿主压缩时易被截断或挤占其他 skill。\n"
+                 "方案：把低频细则下沉到 references/，或调大 --token-budget 匹配真实上下文窗口。")
     elif est > token_budget * 0.8:
-        log("low", "BD-004", f"正文估算 ~{est} token 贴近预算 {token_budget}（80% 以上）。")
+        log("low", "BD-004", f"正文估算 ~{est} token 贴近预算 {token_budget}（80% 以上）。",
+            hint="诊断：正文已接近预算 80%。\n方案：再删冗述或下沉，给压缩留 20% 余量。")
     # trigger 边界检查：description/when_to_use 是否有 NOT-for / 不适用
     desc = str(data.get("description") or "") + " " + str(data.get("when_to_use") or "")
     has_boundary = bool(re.search(r"(NOT for|不适用|不触发|不用于|do NOT use|not for)", desc, re.I))
     if not has_boundary:
-        log("medium", "TR-001", "frontmatter 缺触发边界（NOT-for / 不适用）——易误触发。")
+        log("medium", "TR-001", "frontmatter 缺触发边界（NOT-for / 不适用）——易误触发。",
+            hint="诊断：description/when_to_use 只有正向触发，无 NOT-for → 相邻 skill 易抢词。\n"
+                 "方案：在 description 末尾加一句『NOT for: …（列 1~3 个最易混淆场景）』。")
     # 硬约束层检查：正文是否显式标「每轮/硬约束/HARD」
     has_hard = bool(re.search(r"(硬约束|HARD CONSTRAINT|每轮必须|must obey every)", body, re.I))
     if not has_hard:
-        log("low", "ST-001", "正文未见显式「硬约束/每轮必须」层——压缩后规则易丢。")
+        log("low", "ST-001", "正文未见显式「硬约束/每轮必须」层——压缩后规则易丢。",
+            hint="诊断：正文没有『硬约束/每轮必须』标记层 → 压缩时规则可能被裁。\n"
+                 "方案：把『每轮必须遵守』的红线集中在一个『硬约束』小节，并显式标注每轮必须。")
 
 
 def check_refs(body, base_dir):
@@ -161,7 +197,9 @@ def check_refs(body, base_dir):
             continue
         full = os.path.join(base_dir, rel)
         if not os.path.exists(full):
-            log("medium", "RF-001", f"引用路径 '{rel}' 不存在（悬空）。")
+            log("medium", "RF-001", f"引用路径 '{rel}' 不存在（悬空）。",
+                hint="诊断：正文引用了不存在的 references/assets/scripts 文件 → 渐进式披露断链。\n"
+                     "方案：补建该文件，或把引用改成实际存在的路径；引用须相对 skill 根目录。")
 
 
 # ---------------------------------------------------------------- 主流程
@@ -209,6 +247,25 @@ def run(path, platform, token_budget, as_json):
     else:
         print(f"\n=== verdict: {verdict} (exit {code}) ===")
         print(f"blocker={counts['blocker']}  medium={counts['medium']}  low={counts['low']}")
+        # 人工兜底：Agent 改不动时按「诊断 + 建议方案」指给人，按严重度分层
+        if _FINDINGS:
+            print("\n=== 诊断 + 建议方案（人工兜底）===")
+            for sev in ("blocker", "medium", "low"):
+                grp = [f for f in _FINDINGS if f["severity"] == sev]
+                if not grp:
+                    continue
+                label = {"blocker": "BLOCKER（阻断发布，必改）",
+                         "medium": "MEDIUM（建议改，影响质量）",
+                         "low": "LOW（可忽略/提醒项）"}[sev]
+                print(f"\n-- {label} --")
+                for f in grp:
+                    print(f"  [{f['rule_id']}] {f['msg']}")
+                    hint = (f.get("hint") or "").strip()
+                    if hint:
+                        for ln in hint.splitlines():
+                            print(f"    {ln}" if ln else "")
+            print("\n（Agent 无法自动修复时，把以上逐条交给维护者：先按『方案』处理；"
+                  "BLOCKER 未清零前不得发布。）")
 
     sys.exit(code)
 
@@ -219,8 +276,8 @@ def main():
     ap.add_argument("--platform", default="skillhub",
                     choices=["skillhub", "clawhub", "claude", "workbuddy", "github"],
                     help="目标平台口径（默认 skillhub）")
-    ap.add_argument("--token-budget", type=int, default=8000,
-                    help="正文 token 预算（默认 8000）")
+    ap.add_argument("--token-budget", type=int, default=3500,
+                    help="正文 token 预算（默认 3500 ≈ 官方 500 行上限；上下文更大可上调）")
     ap.add_argument("--json", action="store_true", help="stdout 仅输出 JSON")
     args = ap.parse_args()
     run(args.target, args.platform, args.token_budget, args.json)

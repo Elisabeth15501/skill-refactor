@@ -5,17 +5,22 @@ check_skillmd.py — SKILL.md 机械项确定性 lint（skill-md-optimizer 配�
 
 零出网、零必需凭据。仅标准库 + PyYAML（缺失时自动尝试安装，装不上则 BLOCKED）。
 职责：判「机械项」（H6）——frontmatter 语法/字段、name/slug 规范、描述长度、
-正文行数、token 预算估算、references 路径悬空、trigger 无 NOT-for 边界。
+正文行数、token 预算估算、references 路径悬空（代码举例除外）、trigger 无 NOT-for 边界、
+ClawHub Natural-Language Policy 两形态探针（NL-001/002）。
 模型只做「判断层」（该不该拆 references、措辞好坏），机械项交给本脚本，保证跨 Agent 可复现。
 
 用法：
   python check_skillmd.py <SKILL.md 路径> [--platform skillhub|clawhub|claude|workbuddy|github] \
-      [--token-budget 8000] [--json]
+      [--token-budget 3500] [--json]
 
 退出码契约（与 skill-publish-gate 同构，CI 友好）：
   0  PASS      无 blocker（可有 medium/low 建议项）
   2  NEEDS_FIX  仅建议项（medium/low）
   1  BLOCKED    命中 blocker（语法解析失败 / 缺 name / 预算超硬上限等）
+
+--json 输出 schema（schema_version 1.0，CI 冻结）：
+  { schema_version, verdict, exit_code, counts{blocker,medium,low},
+    issues[{rule_id,severity,msg,hint}] }
 """
 import argparse
 import json
@@ -185,9 +190,24 @@ def check_body(body, data, platform, token_budget):
 
 
 def check_refs(body, base_dir):
-    """references/assets 相对路径悬空检测。"""
+    """references/assets 相对路径悬空检测。
+
+    T1.4 边界修正：只认「正文散文里的引用」，剥离 markdown 代码围栏（``` 块）
+    ——代码块里的 `scripts/gate.py` 那类是「代码举例」，不算悬空引用，不报。
+    """
+    # 剥掉 ``` ... ``` 代码围栏，避免把代码里的路径举例误判为悬空引用
+    def _strip_code_fences(text):
+        out, in_block = [], False
+        for ln in text.split("\n"):
+            if ln.lstrip().startswith("```"):
+                in_block = not in_block
+                continue
+            if not in_block:
+                out.append(ln)
+        return "\n".join(out)
+    scanned = _strip_code_fences(body)
     pat = re.compile(r"\((?:references|assets|scripts)/[^\s\)\'\"\]\[]+")
-    for m in pat.finditer(body):
+    for m in pat.finditer(scanned):
         token = m.group(0).strip("(")
         # 去掉锚点/行号
         token = token.split("#")[0]
@@ -198,8 +218,47 @@ def check_refs(body, base_dir):
         full = os.path.join(base_dir, rel)
         if not os.path.exists(full):
             log("medium", "RF-001", f"引用路径 '{rel}' 不存在（悬空）。",
-                hint="诊断：正文引用了不存在的 references/assets/scripts 文件 → 渐进式披露断链。\n"
-                     "方案：补建该文件，或把引用改成实际存在的路径；引用须相对 skill 根目录。")
+                hint="诊断：正文散文引用了不存在的 references/assets/scripts 文件 → 渐进式披露断链。\n"
+                     "方案：补建该文件，或把引用改成实际存在的路径；引用须相对 skill 根目录。"
+                     "（代码块内的路径举例不受此检，故安全。）")
+
+
+# ---------------------------------------------------------------- T1.2 自然语言政策机械探针
+
+def check_language(body, data, fm_blob):
+    """ClawHub Natural Language Policy 机械探针（§6.0 两形态，低/中档，不阻断）。
+
+    形态 1（low）：frontmatter 有 `language:` 但附近无理由/选择声明。
+    形态 2（medium）：正文用户可见指令锁死单语言，无 auto/zh/en 三态或语言说明。
+    两者都不阻断（保持 NEEDS_FIX 档），只是给维护者「该不该补语言选择」的提示。
+    """
+    # 形态 1：frontmatter 显式 language: 且没有就近的 language-choice 说明
+    lang_val = data.get("language")
+    if lang_val:
+        fm_has_just = bool(re.search(
+            r"(language[-_ ]?choice|language[-_ ]?policy|三态|auto.*zh.*en|zh.*auto.*en|locale)",
+            fm_blob, re.I))
+        if not fm_has_just:
+            log("low", "NL-001",
+                f"frontmatter 有 `language: {lang_val}` 但无就近的语言选择/理由声明。",
+                hint="诊断：单语言 frontmatter 标记易命中 ClawHub NL-Policy 形态 1（Low）。\n"
+                     "方案：要么删掉 `language:`，要么在 frontmatter 加一句理由"
+                     "（如『本 skill 默认 en，宿主可覆写』），或在正文补三态 auto/zh/en 选择。")
+    # 形态 2：正文锁死单语言且无三态/语言说明。
+    # 边界：若 frontmatter 已显式 `language:`（NL-001 已覆盖「标记无理由」场景）或正文已有
+    # 三态/locale 说明，则不重复报 NL-002——避免把「已声明语言的合规 skill」误判成锁死。
+    fm_declared_lang = bool(lang_val)
+    has_tristate = bool(re.search(
+        r"(auto/zh/en|auto.*zh.*en|zh.*en.*auto|三态|language[-_ ]?choice|output language|"
+        r"输出语言|user's language|宿主语言|跟随用户语言)", body, re.I))
+    if not fm_declared_lang and not has_tristate:
+        log("medium", "NL-002",
+            "正文未见语言声明（frontmatter 无 language:、正文也无三态/locale 说明）。",
+            hint="诊断：既无 frontmatter language: 也无正文语言说明 → 宿主默认锁死单语言，"
+                 "易命中 ClawHub NL-Policy 形态 2（Medium）。\n"
+                 "方案：在正文加一小节『语言』，声明 auto/zh/en 三态（或说明锁定某 locale 的理由）；"
+                 "或在 frontmatter 加 `language: <code>` 并配理由。"
+                 "若本 skill 本就只服务单一 locale，请显式写出理由，保持 NL-Policy 可解释。")
 
 
 # ---------------------------------------------------------------- 主流程
@@ -225,6 +284,8 @@ def run(path, platform, token_budget, as_json):
         check_name(os.path.basename(path), name, data, platform)
         check_body(body, data, platform, token_budget)
         check_refs(body, base_dir)
+        # T1.2 Natural-Language Policy 机械探针（两形态，不阻断）
+        check_language(body, data, fm_text)
 
     # verdict 判定
     has_blocker = any(f["severity"] == "blocker" for f in _FINDINGS)
@@ -241,8 +302,23 @@ def run(path, platform, token_budget, as_json):
         counts[f["severity"]] += 1
 
     if as_json:
+        # T1.6 JSON schema 冻结（CI / pre-publish hook 消费）。顶层稳定字段：
+        #   schema_version, verdict, exit_code, counts{blocker,medium,low},
+        #   issues[] 每条固定 4 字段 {rule_id, severity, msg, hint}
         print(json.dumps({
-            "verdict": verdict, "counts": counts, "issues": _FINDINGS,
+            "schema_version": "1.0",
+            "verdict": verdict,
+            "exit_code": code,
+            "counts": counts,
+            "issues": [
+                {
+                    "rule_id": f["rule_id"],
+                    "severity": f["severity"],
+                    "msg": f["msg"],
+                    "hint": f.get("hint", ""),
+                }
+                for f in _FINDINGS
+            ],
         }, ensure_ascii=False, indent=2))
     else:
         print(f"\n=== verdict: {verdict} (exit {code}) ===")

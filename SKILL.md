@@ -119,8 +119,9 @@ Four criteria:
   compaction.
 - **C. Convergence** — the single-run flow is five steps or fewer; each step states
   its input / output / failure fallback; it closes within one turn with no later re-read.
-- **B. Budget** — the whole file fits an 8000-token budget, the core rules sit in the
-  first ~3000, and ~5000 is reserved as compaction headroom.
+- **B. Budget** — the whole file fits a 3500-token budget (the official 500-line
+  body cap), the core rules sit in the first ~1500–2000, and the remaining slack
+  is reserved as compaction headroom.
 
 ---
 
@@ -142,7 +143,7 @@ Each step states input / action / output / fallback.
 ### Step 2 - Read the original and run the linter
 - **Input:** the target from Step 1.
 - **Action:** Read the full SKILL.md (frontmatter and body). Run
-  `scripts/check_skillmd.py <file> [--platform p] [--token-budget 8000]` to get the
+  `scripts/check_skillmd.py <file> [--platform p] [--token-budget 3500]` to get the
   red/amber/green calls and the budget read.
 - **Output:** line-numbered original + linter verdict (mechanical items already called).
 - **Fallback:** items the linter cannot call (for example, "should this be split into
@@ -176,8 +177,12 @@ Each step states input / action / output / fallback.
 - **Action:** Give the "what changed + the assumed list + the P0 items + next steps
   (split into references? run the publish gate?)". State the boundary plainly: this
   skill does not fix the called code and does not run a publish-compliance gate.
-- **Output:** the closing paragraph.
-- **Fallback:** none - the boundary and next step must be named.
+- **Acceptance gate (全通过):** re-run the linter on the emitted file; the refactor
+  is "done" only when `BLOCKER=0 AND MEDIUM=0` (LOW/reminder items may remain and be
+  reported, never silently dropped - H1). If any BLOCKER or MEDIUM remains, return to
+  Step 3 with the linter's "diagnosis + suggested fix" hints (human fallback).
+- **Output:** the closing paragraph + the final linter verdict.
+- **Fallback:** if a same-named report exists, choose a new name; never overwrite.
 
 ---
 
@@ -194,6 +199,7 @@ non-skill files.
 | Token budget and compaction headroom | `references/token_budget.md` |
 | i18n / Natural-Language Policy + non-Chinese-user checklist | `references/i18n_policy.md` |
 | Polishing the companion README.md (structure, badges, install, examples, license) | `references/readme_quality.md` (skeleton: `assets/readme_template.md`) |
+| The audit-mode output contract (read-only diagnostic report shape) | `references/skillmd_audit_sample.md` |
 | A quick mechanical screen | `scripts/check_skillmd.py <file> [--platform p]` |
 
 ## Trigger examples

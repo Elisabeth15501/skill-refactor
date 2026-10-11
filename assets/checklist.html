@@ -99,7 +99,7 @@
 <div class="wrap">
   <h1>SKILL.md Optimizer · 可勾选审计清单</h1>
   <p class="sub">配合 <code>skill-md-optimizer</code> 使用 · 勾选「已满足」项，未勾项即改进目标</p>
-  <p class="meta">四根判据 T/L/C/B · 9 条硬约束 H1–H9 · 5 步流程 · readme 五问 · i18n 政策 · 共 33 项</p>
+  <p class="meta">四根判据 T/L/C/B · 9 条硬约束 H1–H9 · 5 步流程 · readme 五问 · i18n 政策 · 共 35 项</p>
 
   <div class="progress">
     <div class="bar"><i id="fill"></i></div>
@@ -165,6 +165,8 @@
     <label class="item"><input type="checkbox" data-k="i2"><div class="body"><div class="title">正文提供 auto/zh/en 三态选择（置于前 3000 token）</div></div></label>
     <label class="item"><input type="checkbox" data-k="i3"><div class="body"><div class="title">description 英文主位，非中文用户可被触发</div></div></label>
     <label class="item"><input type="checkbox" data-k="i4"><div class="body"><div class="title">默认假设项中英各一句；路径用正斜杠；产物命名双语</div></div></label>
+    <label class="item"><input type="checkbox" data-k="i5"><div class="body"><div class="title">判定/结论类产物成对出「中 + EN」两版，命名 <code>*.md</code> / <code>*.en.md</code>（或 .html / .en.html）</div><div class="hint">与 §7.6 产物命名对齐；缺英文版时 fallback 单语并在报告标注。</div></div></label>
+    <label class="item"><input type="checkbox" data-k="i6"><div class="body"><div class="title">token 估算器二选一（char ÷4 / tiktoken 真数），缺库自动回落</div><div class="hint">P2 增强：linter 加 <code>--estimator</code>；离线保持零依赖，宿主有 tiktoken 时走真数。</div></div></label>
   </section>
 
   <div class="tools">

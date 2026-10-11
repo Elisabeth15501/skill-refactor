@@ -101,6 +101,26 @@ BODY_LINE_SOFT = 200         # 软上限（建议）
 BODY_LINE_HARD = 500         # 硬上限（blocker）
 
 
+def estimate_tokens(body, estimator="char"):
+    """T3.2 分层估算器。
+
+    - "char"（默认）：len(body)//4，零依赖、离线可复现（CI 友好，主路径）。
+    - "tiktoken"：若宿主已装 OpenAI 官方 tiktoken 且可加载 cl100k_base，则用真
+      tokenizer；缺库 / 无缓存（离线）则自动回落 char 并返回 (估算值, 实际用的算法)。
+    返回 (est, used)：est 为 token 估算值，used 为实际采用的算法名（"char" 或 "tiktoken"）。
+    不抛异常——估算精度降级不是合规 BLOCKED，只标注。
+    """
+    if estimator == "tiktoken":
+        try:
+            import tiktoken  # type: ignore
+            enc = tiktoken.encoding_for_model("gpt-4")  # cl100k_base
+            return len(enc.encode(body)), "tiktoken"
+        except Exception:
+            # 缺库 / 离线无缓存：回落字符法，不 BLOCKED（H4 零网络契约优先）
+            return len(body) // 4, "char(fallback)"
+    return len(body) // 4, "char"
+
+
 def check_name(slug, name, data, platform):
     # name 规范
     if not name:
@@ -156,7 +176,7 @@ def check_name(slug, name, data, platform):
                 hint="诊断：无 license 键。\n方案：建议与 GitHub 仓库 LICENSE 保持一致（本 skill 默认 MIT-0）。")
 
 
-def check_body(body, data, platform, token_budget):
+def check_body(body, data, platform, token_budget, estimator="char"):
     lines = body.count("\n") + (1 if body else 0)
     if lines > BODY_LINE_HARD:
         log("blocker", "BD-001", f"正文 {lines} 行 > 硬上限 {BODY_LINE_HARD}；请拆 references。",
@@ -165,14 +185,16 @@ def check_body(body, data, platform, token_budget):
     elif lines > BODY_LINE_SOFT:
         log("medium", "BD-002", f"正文 {lines} 行 > 软上限 {BODY_LINE_SOFT}（建议拆 references）。",
             hint="诊断：正文偏长（>200 行）。\n方案：考虑把可独立查阅的块拆到 references/，正文保持精简。")
-    # token 预算估算（正文约 4 字符/token，粗算）
-    est = len(body) // 4
+    # token 预算估算（T3.2 分层：char 默认 / tiktoken 真数）
+    est, used = estimate_tokens(body, estimator)
+    tag = "" if used == "char" else f"（{used}）"
     if est > token_budget:
-        log("blocker", "BD-003", f"正文估算 ~{est} token > 预算 {token_budget}；请下沉细则。",
+        log("blocker", "BD-003", f"正文估算 ~{est} token{tag} > 预算 {token_budget}；请下沉细则。",
             hint="诊断：正文 token 超预算 → 宿主压缩时易被截断或挤占其他 skill。\n"
-                 "方案：把低频细则下沉到 references/，或调大 --token-budget 匹配真实上下文窗口。")
+                 "方案：把低频细则下沉到 references/，或调大 --token-budget 匹配真实上下文窗口。"
+                 "（tag 标注实际估算算法；tiktoken 缺库/离线会自动回落 char。）")
     elif est > token_budget * 0.8:
-        log("low", "BD-004", f"正文估算 ~{est} token 贴近预算 {token_budget}（80% 以上）。",
+        log("low", "BD-004", f"正文估算 ~{est} token{tag} 贴近预算 {token_budget}（80% 以上）。",
             hint="诊断：正文已接近预算 80%。\n方案：再删冗述或下沉，给压缩留 20% 余量。")
     # trigger 边界检查：description/when_to_use 是否有 NOT-for / 不适用
     desc = str(data.get("description") or "") + " " + str(data.get("when_to_use") or "")
@@ -263,7 +285,7 @@ def check_language(body, data, fm_blob):
 
 # ---------------------------------------------------------------- 主流程
 
-def run(path, platform, token_budget, as_json):
+def run(path, platform, token_budget, as_json, estimator="char"):
     global _FINDINGS
     _FINDINGS = []
     if not os.path.isfile(path):
@@ -282,7 +304,7 @@ def run(path, platform, token_budget, as_json):
     if data is not None:
         name = data.get("name") or ""
         check_name(os.path.basename(path), name, data, platform)
-        check_body(body, data, platform, token_budget)
+        check_body(body, data, platform, token_budget, estimator)
         check_refs(body, base_dir)
         # T1.2 Natural-Language Policy 机械探针（两形态，不阻断）
         check_language(body, data, fm_text)
@@ -355,8 +377,11 @@ def main():
     ap.add_argument("--token-budget", type=int, default=3500,
                     help="正文 token 预算（默认 3500 ≈ 官方 500 行上限；上下文更大可上调）")
     ap.add_argument("--json", action="store_true", help="stdout 仅输出 JSON")
+    ap.add_argument("--estimator", default="char", choices=["char", "tiktoken"],
+                    help="正文 token 估算器：char=len/4（默认，零依赖离线）；"
+                         "tiktoken=OpenAI 官方真数，缺库/离线自动回落 char")
     args = ap.parse_args()
-    run(args.target, args.platform, args.token_budget, args.json)
+    run(args.target, args.platform, args.token_budget, args.json, args.estimator)
 
 
 if __name__ == "__main__":

@@ -267,12 +267,15 @@ def check_language(body, data, fm_blob):
                      "方案：要么删掉 `language:`，要么在 frontmatter 加一句理由"
                      "（如『本 skill 默认 en，宿主可覆写』），或在正文补三态 auto/zh/en 选择。")
     # 形态 2：正文锁死单语言且无三态/语言说明。
-    # 边界：若 frontmatter 已显式 `language:`（NL-001 已覆盖「标记无理由」场景）或正文已有
-    # 三态/locale 说明，则不重复报 NL-002——避免把「已声明语言的合规 skill」误判成锁死。
+    # 边界（合规出口，任一即豁免）：
+    #   (a) frontmatter 已显式 `language:` —— 锁定了 locale（NL-001 负责补理由），
+    #       此时不再重复报 NL-002，避免把「已声明语言的合规 skill」误判成锁死；
+    #   (b) 正文有三态 / 语言说明 / 锁定 locale 理由（面向单一受众的显式声明）。
     fm_declared_lang = bool(lang_val)
     has_tristate = bool(re.search(
         r"(auto/zh/en|auto.*zh.*en|zh.*en.*auto|三态|language[-_ ]?choice|output language|"
-        r"输出语言|user's language|宿主语言|跟随用户语言)", body, re.I))
+        r"输出语言|user's language|宿主语言|跟随用户语言|锁定.*zh|锁定.*en|locked to|面向.{0,6}(用户|受众))",
+        body, re.I))
     if not fm_declared_lang and not has_tristate:
         log("medium", "NL-002",
             "正文未见语言声明（frontmatter 无 language:、正文也无三态/locale 说明）。",

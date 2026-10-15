@@ -1,6 +1,7 @@
 ---
 name: skill-md-optimizer
 slug: skill-md-optimizer
+displayName: "SKILL.md 渐进式披露优化器"
 version: 1.0.0
 license: MIT-0
 summary: >-
@@ -32,6 +33,12 @@ when_to_use: >-
   code-quality audits (skill-clean-audit), publish gates (skill-publish-gate),
   from-scratch creation (skill-creator), or a pure YAML syntax error (fix the syntax
   directly).
+trigger_keywords:
+  - SKILL.md 优化
+  - 渐进式披露
+  - frontmatter 精修
+  - 触发词精化
+  - skill 瘦身
 tags:
   - skill
   - skill-md
@@ -41,6 +48,12 @@ tags:
   - audit
   - readme
   - skill-optimization
+network: none
+disclaimer: >-
+  本 skill 仅做 SKILL.md 文本与结构优化，不执行外部网络请求，不读取环境变量或
+  凭据；linter（scripts/check_skillmd.py）为纯离线运行，零网络、零必需密钥。
+  结论是本地预检，不构成任何平台上架保证；最终能否发布由各平台审核决定。
+reference: https://github.com/your-org/skill-md-optimizer
 metadata:
   openclaw:
     requires:

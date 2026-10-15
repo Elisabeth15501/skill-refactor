@@ -1,8 +1,0 @@
-# Keep the published package to what the skill actually ships.
-# Ignore common noise so it does not enter the ClawHub bundle.
-*.bak
-*.pyc
-__pycache__/
-.DS_Store
-.git/
-.gitignore

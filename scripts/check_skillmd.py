@@ -26,7 +26,6 @@ import argparse
 import json
 import os
 import re
-import subprocess
 import sys
 
 # ---------------------------------------------------------------- 基础工具
@@ -70,20 +69,20 @@ def parse_frontmatter(text):
 
 
 def load_yaml(fm_text, path, platform):
-    """解析 frontmatter YAML。失败即 BLOCKED（不静默通过）。"""
+    """解析 frontmatter YAML。失败即 BLOCKED（不静默通过）。
+
+    PyYAML 缺失时不自动安装（H4 零网络契约；天禧AI 平台红旗特征禁用 subprocess），
+    直接报 BLOCKER，由用户手动 `pip install pyyaml` 解决。
+    """
     try:
         import yaml  # type: ignore
     except ImportError:
-        # 尝试自动安装（离线时失败 → 升级为 BLOCKER）
-        try:
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "-q", "pyyaml"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            )
-            import yaml
-        except Exception:
-            log("blocker", "FM-003", "缺 PyYAML 且自动安装失败；无法解析 frontmatter（BLOCKED，不静默通过）。")
-            return None
+        log("blocker", "FM-003",
+            "缺 PyYAML 且无法自动安装（本 skill 遵守零网络契约，不调用 subprocess 装包）。",
+            hint="诊断：PyYAML 未安装。\n"
+                 "方案：`python -m pip install pyyaml` 后重跑；"
+                 "或在 CI 环境预装依赖。")
+        return None
     try:
         data = yaml.safe_load(fm_text)
         if not isinstance(data, dict):
